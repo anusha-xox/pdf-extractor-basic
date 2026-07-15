@@ -55,17 +55,24 @@ _model: ModelInference | None = None
 def _get_model() -> ModelInference:
     global _model
     if _model is None:
-        api_key    = os.environ["WATSONX_API_KEY"]
-        project_id = os.environ["WATSONX_PROJECT_ID"]
+        api_key    = os.environ.get("WATSONX_API_KEY", "")
+        project_id = os.environ.get("WATSONX_PROJECT_ID", "")
         model_id   = os.environ.get("WATSONX_MODEL_ID", "ibm/granite-vision-3-2-2b")
         url        = os.environ.get("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
 
+        if not api_key or not project_id:
+            raise EnvironmentError(
+                "WATSONX_API_KEY and WATSONX_PROJECT_ID must be set as environment variables."
+            )
+
         credentials = Credentials(api_key=api_key, url=url)
-        _model = ModelInference(
+        # Build outside the try so a failed init doesn't cache a broken object
+        model = ModelInference(
             model_id=model_id,
             credentials=credentials,
             project_id=project_id,
         )
+        _model = model
     return _model
 
 
@@ -114,10 +121,18 @@ def extract_fields_from_image(base64_image: str) -> dict:
 
     response = model.chat(
         messages=messages,
-        params={"max_new_tokens": 1024, "temperature": 0},
+        params={
+            "max_new_tokens": 1024,
+            "temperature": 0.1,   # 0 can stall some vision models
+        },
     )
 
-    raw_text = response["choices"][0]["message"]["content"]
+    # Safely navigate response — log full response if structure is unexpected
+    try:
+        raw_text = response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"Unexpected WatsonX response structure: {response}") from exc
+
     return _parse_json_from_response(raw_text)
 
 

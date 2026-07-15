@@ -90,23 +90,31 @@ def _process_job(job_id: str, pdf_paths: list[Path]) -> None:
     job["total"] = len(pdf_paths)
     results: list[tuple[str, dict]] = []
 
-    for pdf_path in pdf_paths:
-        log.info("[job %s] processing %s", job_id, pdf_path.name)
-        try:
-            images = pdf_to_base64_images(str(pdf_path), dpi=150)
-            fields = extract_from_pdf_images(images)
-            results.append((str(pdf_path), fields))
-        except Exception as exc:  # noqa: BLE001
-            log.error("[job %s] failed on %s: %s", job_id, pdf_path.name, exc)
-            results.append((str(pdf_path), {"error": str(exc), "line_items": []}))
+    try:
+        for pdf_path in pdf_paths:
+            log.info("[job %s] processing %s", job_id, pdf_path.name)
+            try:
+                images = pdf_to_base64_images(str(pdf_path), dpi=150)
+                fields = extract_from_pdf_images(images)
+                log.info("[job %s] ✓ %s — fields: %s", job_id, pdf_path.name,
+                         {k: v for k, v in fields.items() if k != "line_items"})
+                results.append((str(pdf_path), fields))
+            except Exception as exc:  # noqa: BLE001
+                log.error("[job %s] ✗ %s — %s", job_id, pdf_path.name, exc, exc_info=True)
+                results.append((str(pdf_path), {"_extraction_error": str(exc), "line_items": []}))
 
-        job["processed"] += 1
+            job["processed"] += 1
 
-    output_path = WORK_DIR / job_id / "debit_memos.xlsx"
-    write_excel(results, str(output_path))
-    job["output_path"] = str(output_path)
-    job["status"] = "done"
-    log.info("[job %s] complete → %s", job_id, output_path)
+        output_path = WORK_DIR / job_id / "debit_memos.xlsx"
+        write_excel(results, str(output_path))
+        job["output_path"] = str(output_path)
+        job["status"] = "done"
+        log.info("[job %s] complete → %s", job_id, output_path)
+
+    except Exception as exc:  # noqa: BLE001
+        log.error("[job %s] fatal error: %s", job_id, exc, exc_info=True)
+        job["status"] = "error"
+        job["error"] = str(exc)
 
 
 # ---------------------------------------------------------------------------
