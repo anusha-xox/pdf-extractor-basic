@@ -53,6 +53,18 @@ Extract these fields (use null if a field is not found):
 _model: ModelInference | None = None
 
 
+# Known vision-capable models — warn loudly if something else is configured
+_VISION_MODELS = {
+    "ibm/granite-vision-3-2-2b",
+    "ibm/granite-vision-3-1-2b",
+    "meta-llama/llama-4-maverick-17b-128e-instruct-fp8",  # multimodal
+    "meta-llama/llama-4-scout-17b-16e-instruct",          # multimodal
+}
+
+import logging as _logging
+_log = _logging.getLogger(__name__)
+
+
 def _get_model() -> ModelInference:
     global _model
     if _model is None:
@@ -63,7 +75,14 @@ def _get_model() -> ModelInference:
 
         if not api_key or not project_id:
             raise EnvironmentError(
-                "WATSONX_API_KEY and WATSONX_PROJECT_ID must be set as environment variables."
+                "WATSONX_API_KEY and WATSONX_PROJECT_ID must be set as environment variables. "
+                f"Current values — API_KEY present: {bool(api_key)}, PROJECT_ID present: {bool(project_id)}"
+            )
+
+        if model_id not in _VISION_MODELS:
+            _log.warning(
+                "WATSONX_MODEL_ID '%s' may not support image inputs. "
+                "Recommended vision model: ibm/granite-vision-3-2-2b", model_id
             )
 
         credentials = Credentials(api_key=api_key, url=url)

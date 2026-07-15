@@ -14,6 +14,7 @@ GET  /               — serves the frontend UI
 import asyncio
 import logging
 import shutil
+import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -30,7 +31,9 @@ from backend.excel_writer import write_excel
 from backend.pdf_to_images import pdf_to_base64_images
 from backend.watsonx_extractor import extract_from_pdf_images
 
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+# Load .env for local dev only — never override vars already set by the platform
+_env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path, override=False)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -38,10 +41,33 @@ load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
+
+def _check_env() -> None:
+    """Log env var presence at startup so misconfiguration is immediately visible."""
+    for var in ("WATSONX_API_KEY", "WATSONX_PROJECT_ID", "WATSONX_MODEL_ID", "WATSONX_URL"):
+        val = os.environ.get(var, "")
+        masked = (val[:4] + "****") if len(val) > 4 else ("(not set)" if not val else "****")
+        log.info("ENV %s = %s", var, masked)
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Debit Memo Extractor", version="1.0.0")
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    _check_env()
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """Returns env var presence — helps confirm Railway vars are injected."""
+    status = {}
+    for var in ("WATSONX_API_KEY", "WATSONX_PROJECT_ID", "WATSONX_MODEL_ID", "WATSONX_URL"):
+        val = os.environ.get(var, "")
+        status[var] = (val[:4] + "****") if len(val) > 4 else ("(not set)" if not val else "****")
+    return {"status": "ok", "env": status}
 
 # CORS — allow all origins so the UI works whether opened via file:// or any
 # dev server. The API only processes local files, so this is acceptable.
@@ -65,9 +91,9 @@ JOBS: dict[str, dict] = {}
 # Shared thread pool — max 5 concurrent extraction jobs
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
-# Always store jobs next to this file, regardless of cwd
-WORK_DIR = Path(__file__).parent / "jobs"
-WORK_DIR.mkdir(exist_ok=True)
+# Persistent dir for finished Excel files only (PDFs use a tempdir per job)
+OUTPUT_DIR = Path(__file__).parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +111,11 @@ class JobStatus(BaseModel):
 # Background processing (runs synchronously in a thread via FastAPI's
 # run_in_threadpool so the event loop stays free)
 # ---------------------------------------------------------------------------
-def _process_job(job_id: str, pdf_paths: list[Path]) -> None:
+def _process_job(job_id: str, pdf_paths: list[Path], tmp_dir: str) -> None:
+    """
+    Extract all PDFs, write Excel to OUTPUT_DIR, then delete the temp dir
+    that held the uploaded PDFs regardless of success or failure.
+    """
     job = JOBS[job_id]
     job["total"] = len(pdf_paths)
     results: list[tuple[str, dict]] = []
@@ -112,7 +142,7 @@ def _process_job(job_id: str, pdf_paths: list[Path]) -> None:
 
             job["processed"] += 1
 
-        output_path = WORK_DIR / job_id / "debit_memos.xlsx"
+        output_path = OUTPUT_DIR / f"{job_id}.xlsx"
         write_excel(results, str(output_path))
         job["output_path"] = str(output_path)
         job["status"] = "done"
@@ -122,6 +152,11 @@ def _process_job(job_id: str, pdf_paths: list[Path]) -> None:
         log.error("[job %s] fatal error: %s", job_id, exc, exc_info=True)
         job["status"] = "error"
         job["error"] = str(exc)
+
+    finally:
+        # Always wipe the temp dir — PDFs are no longer needed after extraction
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        log.info("[job %s] temp dir deleted: %s", job_id, tmp_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -138,18 +173,18 @@ async def upload_pdfs(files: list[UploadFile] = File(...)):
             raise HTTPException(status_code=400, detail=f"'{f.filename}' is not a PDF.")
 
     job_id = str(uuid.uuid4())
-    job_dir = WORK_DIR / job_id
 
-    # Register job BEFORE creating dir so no partial state exists on failure
+    # Register job before touching the filesystem
     JOBS[job_id] = {"status": "processing", "total": len(files), "processed": 0, "output_path": None, "error": None}
 
     try:
-        job_dir.mkdir(parents=True)
+        # Temp dir holds uploaded PDFs — deleted by _process_job when done
+        tmp_dir = tempfile.mkdtemp(prefix=f"debit_memo_{job_id}_")
 
         # Save uploaded files — explicitly close each upload handle when done
         pdf_paths: list[Path] = []
         for upload in files:
-            dest = job_dir / (upload.filename or f"{uuid.uuid4()}.pdf")
+            dest = Path(tmp_dir) / (upload.filename or f"{uuid.uuid4()}.pdf")
             try:
                 with dest.open("wb") as fh:
                     shutil.copyfileobj(upload.file, fh)
@@ -158,14 +193,14 @@ async def upload_pdfs(files: list[UploadFile] = File(...)):
             pdf_paths.append(dest)
 
     except Exception as exc:
-        # Clean up orphaned dir and job entry on upload failure
-        shutil.rmtree(job_dir, ignore_errors=True)
+        # Clean up temp dir and job entry on upload failure
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         del JOBS[job_id]
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded files: {exc}") from exc
 
     # Submit to the bounded thread pool so the event loop stays free
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(_EXECUTOR, _process_job, job_id, pdf_paths)
+    loop.run_in_executor(_EXECUTOR, _process_job, job_id, pdf_paths, tmp_dir)
 
     return JobStatus(job_id=job_id, status="processing", total=len(pdf_paths), processed=0)
 
@@ -200,7 +235,20 @@ async def download_excel(job_id: str):
         path=output_path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename="debit_memos.xlsx",
+        background=_cleanup_after_download(output_path),
     )
+
+
+def _cleanup_after_download(path: str):
+    """BackgroundTask that removes the Excel file after it has been streamed."""
+    from starlette.background import BackgroundTask
+    def _delete():
+        try:
+            Path(path).unlink(missing_ok=True)
+            log.info("cleaned up downloaded file: %s", path)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not delete %s: %s", path, exc)
+    return BackgroundTask(_delete)
 
 
 @app.get("/logs/{job_id}")
