@@ -63,7 +63,13 @@ def _style_header_row(ws, num_cols: int) -> None:
 
 def _auto_width(ws) -> None:
     for col_cells in ws.columns:
-        max_len = max((len(str(c.value or "")) for c in col_cells), default=10)
+        # Skip header row (row 1) when computing data width to avoid over-wide columns
+        data_cells = [c for c in col_cells if c.row > 1]
+        if data_cells:
+            max_len = max((len(str(c.value or "")) for c in data_cells), default=10)
+        else:
+            # No data rows — fall back to header width
+            max_len = len(str(col_cells[0].value or ""))
         ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max_len + 4, 50)
 
 
@@ -106,8 +112,8 @@ def write_excel(results: list[tuple[str, dict]], output_path: str) -> None:
             for col in range(1, len(SUMMARY_COLUMNS) + 1):
                 ws_summary.cell(row=row_idx, column=col).fill = _ALT_FILL
 
-        # Line-item rows
-        for item in fields.get("line_items", []):
+        # Line-item rows — guard against model returning null for line_items
+        for item in (fields.get("line_items") or []):
             li_row = []
             for col in LINE_ITEM_COLUMNS:
                 if col == "source_file":

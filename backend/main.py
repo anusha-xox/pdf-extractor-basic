@@ -132,20 +132,32 @@ async def upload_pdfs(files: list[UploadFile] = File(...)):
 
     job_id = str(uuid.uuid4())
     job_dir = WORK_DIR / job_id
-    job_dir.mkdir(parents=True)
 
-    # Save uploaded files
-    pdf_paths: list[Path] = []
-    for upload in files:
-        dest = job_dir / (upload.filename or f"{uuid.uuid4()}.pdf")
-        with dest.open("wb") as fh:
-            shutil.copyfileobj(upload.file, fh)
-        pdf_paths.append(dest)
+    # Register job BEFORE creating dir so no partial state exists on failure
+    JOBS[job_id] = {"status": "processing", "total": len(files), "processed": 0, "output_path": None, "error": None}
 
-    JOBS[job_id] = {"status": "processing", "total": len(pdf_paths), "processed": 0, "output_path": None, "error": None}
+    try:
+        job_dir.mkdir(parents=True)
+
+        # Save uploaded files — explicitly close each upload handle when done
+        pdf_paths: list[Path] = []
+        for upload in files:
+            dest = job_dir / (upload.filename or f"{uuid.uuid4()}.pdf")
+            try:
+                with dest.open("wb") as fh:
+                    shutil.copyfileobj(upload.file, fh)
+            finally:
+                await upload.close()
+            pdf_paths.append(dest)
+
+    except Exception as exc:
+        # Clean up orphaned dir and job entry on upload failure
+        shutil.rmtree(job_dir, ignore_errors=True)
+        del JOBS[job_id]
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded files: {exc}") from exc
 
     # Submit to the bounded thread pool so the event loop stays free
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     loop.run_in_executor(_EXECUTOR, _process_job, job_id, pdf_paths)
 
     return JobStatus(job_id=job_id, status="processing", total=len(pdf_paths), processed=0)

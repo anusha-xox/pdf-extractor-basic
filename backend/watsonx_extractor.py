@@ -82,15 +82,18 @@ def _get_model() -> ModelInference:
 
 def _parse_json_from_response(text: str) -> dict:
     """Extract the first JSON object found in *text*."""
-    # Strip markdown code fences if present
-    text = re.sub(r"```(?:json)?", "", text).strip()
+    # Strip markdown code fences and surrounding whitespace
+    text = re.sub(r"```(?:json)?", "", text).strip().strip("`").strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         # Fallback: find the first {...} block
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
-            return json.loads(match.group())
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
         raise ValueError(f"No valid JSON found in model response:\n{text}")
 
 
@@ -142,12 +145,16 @@ def extract_from_pdf_images(page_images: list[str]) -> dict:
     non-null values encountered on earlier pages. Line items are
     accumulated across all pages.
     """
+    if not page_images:
+        raise ValueError("No page images provided — PDF may be empty or corrupt.")
+
     merged: dict = {}
     all_line_items: list[dict] = []
 
     for page_b64 in page_images:
         fields = extract_fields_from_image(page_b64)
-        line_items = fields.pop("line_items", []) or []
+        # Guard: model may return "line_items": null
+        line_items = fields.pop("line_items", None) or []
         all_line_items.extend(line_items)
 
         for key, value in fields.items():
