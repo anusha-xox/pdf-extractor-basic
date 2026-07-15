@@ -99,9 +99,16 @@ def _process_job(job_id: str, pdf_paths: list[Path]) -> None:
                 log.info("[job %s] ✓ %s — fields: %s", job_id, pdf_path.name,
                          {k: v for k, v in fields.items() if k != "line_items"})
                 results.append((str(pdf_path), fields))
+                job.setdefault("file_logs", []).append(
+                    {"file": pdf_path.name, "status": "ok",
+                     "fields": {k: v for k, v in fields.items() if k != "line_items"}}
+                )
             except Exception as exc:  # noqa: BLE001
                 log.error("[job %s] ✗ %s — %s", job_id, pdf_path.name, exc, exc_info=True)
                 results.append((str(pdf_path), {"_extraction_error": str(exc), "line_items": []}))
+                job.setdefault("file_logs", []).append(
+                    {"file": pdf_path.name, "status": "error", "error": str(exc)}
+                )
 
             job["processed"] += 1
 
@@ -194,3 +201,17 @@ async def download_excel(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename="debit_memos.xlsx",
     )
+
+
+@app.get("/logs/{job_id}")
+async def get_logs(job_id: str):
+    """Return per-file extraction results — useful for debugging empty rows."""
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "error": job.get("error"),
+        "file_logs": job.get("file_logs", []),
+    }

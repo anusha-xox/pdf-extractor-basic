@@ -10,6 +10,7 @@ import re
 
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
+from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
 
 
 # ---------------------------------------------------------------------------
@@ -124,10 +125,10 @@ def extract_fields_from_image(base64_image: str) -> dict:
 
     response = model.chat(
         messages=messages,
-        params={
-            "max_new_tokens": 1024,
-            "temperature": 0.1,   # 0 can stall some vision models
-        },
+        params=TextChatParameters(
+            max_tokens=1024,      # correct key for chat (not max_new_tokens)
+            temperature=0.1,
+        ),
     )
 
     # Safely navigate response — log full response if structure is unexpected
