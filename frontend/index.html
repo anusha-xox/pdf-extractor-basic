@@ -241,7 +241,10 @@
   </div>
 
   <script>
-    const API = 'http://127.0.0.1:8000';
+    // Use same origin when deployed; fall back to localhost for local dev
+    const API = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost'
+      ? 'http://127.0.0.1:8000'
+      : window.location.origin;
     let selectedFiles = [];
     let currentJobId  = null;
     let pollTimer     = null;
