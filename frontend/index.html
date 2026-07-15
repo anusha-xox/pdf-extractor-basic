@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Debit Memo Extractor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      background: #f4f6fb;
+      color: #1f2328;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 40px 48px;
+      width: 100%;
+      max-width: 580px;
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .logo-mark {
+      width: 32px;
+      height: 32px;
+      background: #1F3864;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: -0.5px;
+    }
+    h1 { font-size: 20px; font-weight: 700; color: #1f2328; }
+    .subtitle { font-size: 13px; color: #57606a; margin-bottom: 32px; }
+
+    /* ---- Drop zone ---- */
+    #drop-zone {
+      border: 2px dashed #c8d0de;
+      border-radius: 10px;
+      padding: 36px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: #f7f8fa;
+    }
+    #drop-zone.drag-over {
+      border-color: #3b82d4;
+      background: #eff4fd;
+    }
+    #drop-zone svg { margin-bottom: 10px; }
+    #drop-zone p { font-size: 14px; color: #57606a; }
+    #drop-zone span { color: #3b82d4; font-weight: 600; cursor: pointer; }
+    #file-input { display: none; }
+
+    /* ---- File list ---- */
+    #file-list {
+      margin-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .file-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #f0f3f9;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 13px;
+    }
+    .file-chip .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-chip .remove {
+      cursor: pointer;
+      color: #57606a;
+      font-size: 15px;
+      line-height: 1;
+      border: none;
+      background: none;
+      padding: 0 2px;
+    }
+    .file-chip .remove:hover { color: #cf222e; }
+
+    /* ---- Actions ---- */
+    #actions { margin-top: 24px; }
+
+    button.primary {
+      width: 100%;
+      padding: 11px 0;
+      background: #1F3864;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.primary:hover:not(:disabled) { background: #17305a; }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ---- Progress ---- */
+    #progress-section { display: none; margin-top: 24px; }
+    #progress-label { font-size: 13px; color: #57606a; margin-bottom: 8px; text-align: center; }
+    .progress-bar-track {
+      background: #e5e7eb;
+      border-radius: 99px;
+      height: 8px;
+      overflow: hidden;
+    }
+    #progress-bar-fill {
+      height: 100%;
+      background: #3b82d4;
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+
+    /* ---- Spinner ---- */
+    .spinner-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #57606a;
+    }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid #e5e7eb;
+      border-top-color: #3b82d4;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Download ---- */
+    #download-section { display: none; margin-top: 24px; text-align: center; }
+    #download-section p { font-size: 14px; color: #2da44e; font-weight: 600; margin-bottom: 12px; }
+    button.download {
+      width: 100%;
+      padding: 11px 0;
+      background: #2da44e;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.download:hover { background: #218b3f; }
+    #reset-btn {
+      margin-top: 10px;
+      background: none;
+      border: none;
+      color: #57606a;
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /* ---- Error ---- */
+    #error-box {
+      display: none;
+      margin-top: 16px;
+      background: #fff0f0;
+      border: 1px solid #f5a0a0;
+      color: #cf222e;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo-row">
+      <div class="logo-mark">DM</div>
+      <h1>Debit Memo Extractor</h1>
+    </div>
+    <p class="subtitle">Upload debit memo PDFs — get a structured Excel report powered by WatsonX.</p>
+
+    <!-- Drop zone -->
+    <div id="drop-zone">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c8d0de" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p>Drag &amp; drop PDFs here, or <span id="browse-link">browse</span></p>
+      <p style="margin-top:4px;font-size:12px;color:#8d96a5">Multiple files supported</p>
+      <input type="file" id="file-input" accept=".pdf" multiple />
+    </div>
+
+    <!-- File list -->
+    <div id="file-list"></div>
+
+    <!-- Error -->
+    <div id="error-box"></div>
+
+    <!-- Actions -->
+    <div id="actions">
+      <button class="primary" id="extract-btn" disabled>Extract to Excel</button>
+    </div>
+
+    <!-- Progress -->
+    <div id="progress-section">
+      <p id="progress-label">Processing 0 / 0 files...</p>
+      <div class="progress-bar-track">
+        <div id="progress-bar-fill"></div>
+      </div>
+      <div class="spinner-row">
+        <div class="spinner"></div>
+        <span>Sending to WatsonX vision model...</span>
+      </div>
+    </div>
+
+    <!-- Download -->
+    <div id="download-section">
+      <p>✓ Extraction complete!</p>
+      <button class="download" id="download-btn">Download Excel</button>
+      <button id="reset-btn">Process another batch</button>
+    </div>
+  </div>
+
+  <script>
+    const API = 'http://127.0.0.1:8000';
+    let selectedFiles = [];
+    let currentJobId  = null;
+    let pollTimer     = null;
+
+    const dropZone     = document.getElementById('drop-zone');
+    const fileInput    = document.getElementById('file-input');
+    const fileList     = document.getElementById('file-list');
+    const extractBtn   = document.getElementById('extract-btn');
+    const progressSec  = document.getElementById('progress-section');
+    const progressLabel= document.getElementById('progress-label');
+    const progressFill = document.getElementById('progress-bar-fill');
+    const downloadSec  = document.getElementById('download-section');
+    const downloadBtn  = document.getElementById('download-btn');
+    const resetBtn     = document.getElementById('reset-btn');
+    const errorBox     = document.getElementById('error-box');
+
+    // ---- Drag & drop ----
+    document.getElementById('browse-link').addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('click', e => { if (e.target.id !== 'browse-link') fileInput.click(); });
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      addFiles([...e.dataTransfer.files]);
+    });
+    fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
+
+    function addFiles(newFiles) {
+      const pdfs = newFiles.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      pdfs.forEach(f => { if (!selectedFiles.find(x => x.name === f.name)) selectedFiles.push(f); });
+      renderFileList();
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = '';
+      selectedFiles.forEach((f, i) => {
+        const chip = document.createElement('div');
+        chip.className = 'file-chip';
+        chip.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#57606a" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <span class="fname">${f.name}</span>
+          <button class="remove" data-idx="${i}">✕</button>`;
+        fileList.appendChild(chip);
+      });
+      fileList.querySelectorAll('.remove').forEach(btn => {
+        btn.addEventListener('click', () => { selectedFiles.splice(+btn.dataset.idx, 1); renderFileList(); });
+      });
+      extractBtn.disabled = selectedFiles.length === 0;
+    }
+
+    // ---- Upload ----
+    extractBtn.addEventListener('click', async () => {
+      if (!selectedFiles.length) return;
+      showError('');
+      setUploading(true);
+
+      const form = new FormData();
+      selectedFiles.forEach(f => form.append('files', f));
+
+      let jobId;
+      try {
+        const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.detail || res.statusText); }
+        const data = await res.json();
+        jobId = data.job_id;
+        currentJobId = jobId;
+      } catch (err) {
+        showError('Upload failed: ' + err.message);
+        setUploading(false);
+        return;
+      }
+
+      progressSec.style.display = 'block';
+      startPolling(jobId);
+    });
+
+    function startPolling(jobId) {
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`${API}/status/${jobId}`);
+          if (!res.ok) throw new Error('Status check failed');
+          const data = await res.json();
+
+          const pct = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+          progressFill.style.width = pct + '%';
+          progressLabel.textContent = `Processing ${data.processed} / ${data.total} file${data.total !== 1 ? 's' : ''}...`;
+
+          if (data.status === 'done') {
+            clearInterval(pollTimer);
+            showDownload();
+          } else if (data.status === 'error') {
+            clearInterval(pollTimer);
+            showError('Extraction error: ' + (data.error || 'Unknown error'));
+            setUploading(false);
+          }
+        } catch (err) {
+          clearInterval(pollTimer);
+          showError('Polling error: ' + err.message);
+          setUploading(false);
+        }
+      }, 2000);
+    }
+
+    downloadBtn.addEventListener('click', () => {
+      if (currentJobId) window.location.href = `${API}/download/${currentJobId}`;
+    });
+
+    resetBtn.addEventListener('click', () => {
+      selectedFiles = [];
+      currentJobId  = null;
+      renderFileList();
+      progressSec.style.display  = 'none';
+      downloadSec.style.display  = 'none';
+      extractBtn.disabled = true;
+      progressFill.style.width = '0%';
+      showError('');
+      setUploading(false);
+    });
+
+    function setUploading(active) {
+      extractBtn.disabled = active;
+      dropZone.style.pointerEvents = active ? 'none' : 'auto';
+    }
+
+    function showDownload() {
+      progressSec.style.display  = 'none';
+      downloadSec.style.display  = 'block';
+      setUploading(false);
+    }
+
+    function showError(msg) {
+      errorBox.style.display = msg ? 'block' : 'none';
+      errorBox.textContent   = msg;
+    }
+  </script>
+</body>
+</html>

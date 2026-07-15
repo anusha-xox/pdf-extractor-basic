@@ -1,0 +1,8 @@
+ibm-watsonx-ai>=1.1.2
+pymupdf>=1.24.0
+openpyxl>=3.1.5
+python-dotenv>=1.0.1
+Pillow>=10.4.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.12

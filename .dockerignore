@@ -1,0 +1,32 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets — never bake into the image
+.env
+
+# Runtime job artefacts
+backend/jobs/
+input/
+output/
+
+# Sample / test data
+Synthetic_Debit_Memo_Pack/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Editor
+.vscode/
+.idea/
