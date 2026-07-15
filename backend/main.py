@@ -13,6 +13,7 @@ GET  /               — serves the frontend UI
 
 import asyncio
 import logging
+import os
 import shutil
 import tempfile
 import uuid
