@@ -1,43 +1,29 @@
-# ---------------------------------------------------------------------------
-# Stage 1 — build: install Python dependencies
-# ---------------------------------------------------------------------------
-FROM registry.redhat.io/ubi9/python-312-minimal:latest AS builder
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy and install deps into a prefix we can later copy cleanly
+# Prevent Python from writing pyc files and enable unbuffered logs
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# Install system dependencies required by PyMuPDF and Pillow
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    curl \
+    libmupdf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies first for better Docker layer caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# ---------------------------------------------------------------------------
-# Stage 2 — runtime: minimal image, non-root user
-# ---------------------------------------------------------------------------
-FROM registry.redhat.io/ubi9/python-312-minimal:latest
-
-# Non-root user required by Code Engine (uid 1001)
-USER 1001
-
-WORKDIR /app
-
-# Pull installed packages from builder stage
-COPY --from=builder /install /usr/local
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy application source
-COPY --chown=1001:1001 backend/  ./backend/
-COPY --chown=1001:1001 frontend/ ./frontend/
-COPY --chown=1001:1001 requirements.txt .
+COPY backend/ ./backend/
+COPY frontend/ ./frontend/
 
-# Code Engine injects secrets as env vars — no .env file needed at runtime
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app/backend
-
-# Code Engine listens on port 8080 by default
 EXPOSE 8080
 
-# Code Engine routes external traffic through its own ingress proxy,
-# so binding to 0.0.0.0 inside the container is safe here.
-CMD ["python", "-m", "uvicorn", "backend.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8080", \
-     "--workers", "1"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
