@@ -26,9 +26,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from excel_writer import write_excel
-from pdf_to_images import pdf_to_base64_images
-from watsonx_extractor import extract_from_pdf_images
+from backend.excel_writer import write_excel
+from backend.pdf_to_images import pdf_to_base64_images
+from backend.watsonx_extractor import extract_from_pdf_images
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
